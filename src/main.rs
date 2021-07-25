@@ -3,10 +3,10 @@ mod redis_actor;
 use std::process;
 
 use actix::{Actor, Addr};
-use actix_web::{self, post, web, App, HttpResponse, HttpServer, Responder};
+use actix_web::{self, get, post, web, App, HttpResponse, HttpServer, Responder};
 use base64::encode_config;
 use crc64::crc64;
-use redis_actor::RedisActor;
+use redis_actor::{GetCommand, RedisActor};
 use serde::Deserialize;
 
 use crate::redis_actor::PutCommand;
@@ -20,10 +20,15 @@ async fn main() -> std::io::Result<()> {
             process::exit(1)
         });
     let addr = actor.start();
-    HttpServer::new(move || App::new().service(handle).data(addr.clone()))
-        .bind("127.0.0.1:8080")?
-        .run()
-        .await
+    HttpServer::new(move || {
+        App::new()
+            .service(handle)
+            .service(get_handle)
+            .app_data(web::Data::new(addr.clone()))
+    })
+    .bind("127.0.0.1:8080")?
+    .run()
+    .await
 }
 
 #[derive(Deserialize)]
@@ -53,4 +58,14 @@ async fn handle(
         "Url: {} user: {} encoded: {}",
         request.url, request.user, encoded
     ))
+}
+
+#[get("/{hash}")]
+async fn get_handle(hash: web::Path<String>, actor: web::Data<Addr<RedisActor>>) -> impl Responder {
+    match actor.send(GetCommand { key: hash.clone() }).await {
+        Err(err) => HttpResponse::InternalServerError().body(format!("Err: {}", err)),
+        Ok(Err(err)) => HttpResponse::InternalServerError().body(format!("Err: {}", err)),
+        Ok(Ok(Some(url))) => HttpResponse::Found().append_header(("Location", url)).finish(),
+        Ok(Ok(None)) => HttpResponse::NotFound().body(format!("Key: {} not found", hash)),
+    }
 }

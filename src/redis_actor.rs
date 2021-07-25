@@ -20,6 +20,12 @@ pub struct PutCommand {
     pub value: String,
 }
 
+#[derive(Message, Debug)]
+#[rtype(result = "Result<Option<String>, RedisError>")]
+pub struct GetCommand {
+    pub key: String,
+}
+
 impl Actor for RedisActor {
     type Context = Context<Self>;
 }
@@ -32,6 +38,21 @@ impl Handler<PutCommand> for RedisActor {
         let cmd: Box<redis::Cmd> = Box::new({
             let mut cmd = redis::cmd("SET");
                 cmd.arg(command.key).arg(command.value);
+                cmd
+        });
+        let future = async move { cmd.query_async(&mut conn).await };
+        Box::pin(future)
+    }
+}
+
+impl Handler<GetCommand>for RedisActor {
+    type Result = ResponseFuture<Result<Option<String>, RedisError>>;
+    
+    fn handle(&mut self, command: GetCommand, _: &mut Self::Context) -> Self::Result {
+        let mut conn = self.conn.clone();
+        let cmd: Box<redis::Cmd> = Box::new({
+            let mut cmd = redis::cmd("GET");
+                cmd.arg(command.key);
                 cmd
         });
         let future = async move { cmd.query_async(&mut conn).await };
